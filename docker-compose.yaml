@@ -1,0 +1,30 @@
+services:
+  qwen3-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: qwen3-tts-gradio:latest
+    ports:
+      - "7860:7860"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - PRELOAD_MODELS=${PRELOAD_MODELS:-}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Model cache (persists across restarts)
+      - hf-cache:/root/.cache/huggingface
+      # Hot reload during development
+      - ./download.py:/app/download.py
+      - ./app.py:/app/app.py
+      - ./entrypoint.sh:/app/entrypoint.sh
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
