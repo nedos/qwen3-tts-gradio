@@ -46,9 +46,9 @@ RUN apt-get update && apt-get install -y sox && rm -rf /var/lib/apt/lists/*
 RUN source /app/venv/bin/activate && \
     pip install --no-cache-dir "qwen-tts @ git+https://github.com/QwenLM/Qwen3-TTS.git"
 
-# Install huggingface_hub for model downloading
+# Install huggingface_hub + audio encoding deps
 RUN source /app/venv/bin/activate && \
-    pip install huggingface_hub
+    pip install huggingface_hub pydub soundfile
 
 # Expose port (default qwen-tts-demo port is 8000)
 EXPOSE 7860

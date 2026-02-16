@@ -1,15 +1,25 @@
 # coding=utf-8
 # Qwen3-TTS multi-tab Gradio demo (no HF Spaces / Zero GPU dependencies).
 # Supports: Voice Design, Voice Clone (Base), TTS (CustomVoice).
+# Chunking: long text is split into 2-sentence chunks for quality.
+# Output: compressed audio (ogg by default, configurable via OUTPUT_FORMAT env).
 
+import io
 import os
+import re
+import tempfile
 
 import gradio as gr
 import numpy as np
+import soundfile as sf
 import torch
 from huggingface_hub import snapshot_download
 
 from qwen_tts import Qwen3TTSModel
+
+# Output format: ogg, mp3, or m4a (requires ffmpeg/pydub)
+OUTPUT_FORMAT = os.getenv("OUTPUT_FORMAT", "ogg")
+MAX_SENTENCES_PER_CHUNK = int(os.getenv("MAX_SENTENCES", "2"))
 
 # ---------------------------------------------------------------------------
 # Global model cache keyed by (model_type, model_size)
@@ -84,6 +94,59 @@ def _audio_to_tuple(audio):
 
 
 # ---------------------------------------------------------------------------
+# Sentence chunking
+# ---------------------------------------------------------------------------
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences on .!? followed by whitespace or end."""
+    parts = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _chunk_text(text: str, max_sentences: int = MAX_SENTENCES_PER_CHUNK) -> list[str]:
+    """Split text into chunks of max_sentences sentences each."""
+    sentences = _split_sentences(text)
+    if not sentences:
+        return [text]
+    chunks = []
+    for i in range(0, len(sentences), max_sentences):
+        chunks.append(" ".join(sentences[i:i + max_sentences]))
+    return chunks
+
+
+def _encode_audio(wav: np.ndarray, sr: int, fmt: str = OUTPUT_FORMAT):
+    """Encode audio to compressed format. Returns (filepath, sample_rate)."""
+    if fmt == "wav":
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        sf.write(tmp.name, wav, sr)
+        return tmp.name
+
+    # Write wav to buffer, convert with pydub
+    wav_buf = io.BytesIO()
+    sf.write(wav_buf, wav, sr, format="WAV")
+    wav_buf.seek(0)
+
+    from pydub import AudioSegment
+    audio = AudioSegment.from_wav(wav_buf)
+
+    suffix = f".{fmt}"
+    if fmt == "m4a":
+        suffix = ".m4a"
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+
+    if fmt == "ogg":
+        audio.export(tmp.name, format="ogg", codec="libopus", bitrate="96k")
+    elif fmt == "mp3":
+        audio.export(tmp.name, format="mp3", bitrate="192k")
+    elif fmt == "m4a":
+        audio.export(tmp.name, format="mp4", codec="aac", bitrate="128k")
+    else:
+        sf.write(tmp.name, wav, sr)
+
+    return tmp.name
+
+
+# ---------------------------------------------------------------------------
 # Generation functions
 # ---------------------------------------------------------------------------
 
@@ -94,14 +157,22 @@ def generate_voice_design(text, language, voice_description):
         return None, "Error: Voice description is required."
     try:
         tts = get_model("VoiceDesign", "1.7B")
-        wavs, sr = tts.generate_voice_design(
-            text=text.strip(),
-            language=language,
-            instruct=voice_description.strip(),
-            non_streaming_mode=True,
-            max_new_tokens=2048,
-        )
-        return (sr, wavs[0]), "Done."
+        chunks = _chunk_text(text.strip())
+        all_wavs = []
+        sr = None
+        for i, chunk in enumerate(chunks):
+            print(f"  Voice design chunk {i+1}/{len(chunks)}: {chunk[:60]}...")
+            w, sr = tts.generate_voice_design(
+                text=chunk,
+                language=language,
+                instruct=voice_description.strip(),
+                non_streaming_mode=True,
+                max_new_tokens=2048,
+            )
+            all_wavs.append(w[0])
+        combined = np.concatenate(all_wavs)
+        path = _encode_audio(combined, sr)
+        return path, f"Done. {len(chunks)} chunk(s), format: {OUTPUT_FORMAT}"
     except Exception as e:
         return None, f"Error: {type(e).__name__}: {e}"
 
@@ -116,15 +187,23 @@ def generate_voice_clone(ref_audio, ref_text, target_text, language, use_xvector
         return None, "Error: Reference text is required when 'Use x-vector only' is not enabled."
     try:
         tts = get_model("Base", model_size)
-        wavs, sr = tts.generate_voice_clone(
-            text=target_text.strip(),
-            language=language,
-            ref_audio=audio_tuple,
-            ref_text=ref_text.strip() if ref_text else None,
-            x_vector_only_mode=use_xvector_only,
-            max_new_tokens=2048,
-        )
-        return (sr, wavs[0]), "Done."
+        chunks = _chunk_text(target_text.strip())
+        all_wavs = []
+        sr = None
+        for i, chunk in enumerate(chunks):
+            print(f"  Voice clone chunk {i+1}/{len(chunks)}: {chunk[:60]}...")
+            w, sr = tts.generate_voice_clone(
+                text=chunk,
+                language=language,
+                ref_audio=audio_tuple,
+                ref_text=ref_text.strip() if ref_text else None,
+                x_vector_only_mode=use_xvector_only,
+                max_new_tokens=2048,
+            )
+            all_wavs.append(w[0])
+        combined = np.concatenate(all_wavs)
+        path = _encode_audio(combined, sr)
+        return path, f"Done. {len(chunks)} chunk(s), format: {OUTPUT_FORMAT}"
     except Exception as e:
         return None, f"Error: {type(e).__name__}: {e}"
 
@@ -136,15 +215,23 @@ def generate_custom_voice(text, language, speaker, instruct, model_size):
         return None, "Error: Speaker is required."
     try:
         tts = get_model("CustomVoice", model_size)
-        wavs, sr = tts.generate_custom_voice(
-            text=text.strip(),
-            language=language,
-            speaker=speaker.lower().replace(" ", "_"),
-            instruct=instruct.strip() if instruct else None,
-            non_streaming_mode=True,
-            max_new_tokens=2048,
-        )
-        return (sr, wavs[0]), "Done."
+        chunks = _chunk_text(text.strip())
+        all_wavs = []
+        sr = None
+        for i, chunk in enumerate(chunks):
+            print(f"  CustomVoice chunk {i+1}/{len(chunks)}: {chunk[:60]}...")
+            w, sr = tts.generate_custom_voice(
+                text=chunk,
+                language=language,
+                speaker=speaker.lower().replace(" ", "_"),
+                instruct=instruct.strip() if instruct else None,
+                non_streaming_mode=True,
+                max_new_tokens=2048,
+            )
+            all_wavs.append(w[0])
+        combined = np.concatenate(all_wavs)
+        path = _encode_audio(combined, sr)
+        return path, f"Done. {len(chunks)} chunk(s), format: {OUTPUT_FORMAT}"
     except Exception as e:
         return None, f"Error: {type(e).__name__}: {e}"
 
@@ -188,7 +275,7 @@ def build_ui():
                         )
                         design_btn = gr.Button("Generate", variant="primary")
                     with gr.Column(scale=2):
-                        design_audio = gr.Audio(label="Output Audio", type="numpy")
+                        design_audio = gr.Audio(label="Output Audio", type="filepath")
                         design_status = gr.Textbox(label="Status", lines=2, interactive=False)
 
                 design_btn.click(
@@ -225,7 +312,7 @@ def build_ui():
                         clone_btn = gr.Button("Clone & Generate", variant="primary")
 
                 with gr.Row():
-                    clone_audio = gr.Audio(label="Output Audio", type="numpy")
+                    clone_audio = gr.Audio(label="Output Audio", type="filepath")
                     clone_status = gr.Textbox(label="Status", lines=2, interactive=False)
 
                 clone_btn.click(
@@ -259,7 +346,7 @@ def build_ui():
                             )
                         tts_btn = gr.Button("Generate", variant="primary")
                     with gr.Column(scale=2):
-                        tts_audio = gr.Audio(label="Output Audio", type="numpy")
+                        tts_audio = gr.Audio(label="Output Audio", type="filepath")
                         tts_status = gr.Textbox(label="Status", lines=2, interactive=False)
 
                 tts_btn.click(
