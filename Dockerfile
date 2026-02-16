@@ -1,4 +1,3 @@
-# Define build arguments
 # Base image with CUDA runtime
 FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
 
@@ -16,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     git \
     ffmpeg \
+    sox \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up workspace directory
@@ -32,25 +32,22 @@ SHELL ["/bin/bash", "-c"]
 RUN source /app/venv/bin/activate && \
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Install flash-attn (separate layer - long compile time, matches c3-comfyui)
+# Install flash-attn (separate layer - long compile time)
 RUN source /app/venv/bin/activate && \
     pip install packaging ninja wheel psutil && \
     pip install flash-attn --no-build-isolation
 
 # === Qwen3-TTS-specific layers below ===
 
-# Install sox (required by qwen-tts for audio processing)
-RUN apt-get update && apt-get install -y sox && rm -rf /var/lib/apt/lists/*
-
-# Install qwen-tts package from git
+# Install qwen-tts + audio encoding deps
 RUN source /app/venv/bin/activate && \
-    pip install --no-cache-dir "qwen-tts @ git+https://github.com/QwenLM/Qwen3-TTS.git"
+    pip install --no-cache-dir \
+    "qwen-tts @ git+https://github.com/QwenLM/Qwen3-TTS.git" \
+    huggingface_hub \
+    pydub \
+    soundfile
 
-# Install huggingface_hub + audio encoding deps
-RUN source /app/venv/bin/activate && \
-    pip install huggingface_hub pydub soundfile
-
-# Expose port (default qwen-tts-demo port is 8000)
+# Expose Gradio port
 EXPOSE 7860
 
 # Copy app and entrypoint (last to enable fast rebuilds)
