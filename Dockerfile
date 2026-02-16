@@ -1,24 +1,52 @@
-# Reuse c3-comfyui base (CUDA 12.9 + torch + flash-attn pre-built)
-ARG COMFYUI_BASE_IMAGE=ghcr.io/compute3ai/c3-comfyui:latest
+# Qwen3-TTS Gradio — follows c3-comfyui layer structure for cache sharing
+# Layers up to flash-attn are identical to c3-comfyui
 ARG MAX_JOBS=2
 ARG EXT_PARALLEL=1
-FROM ${COMFYUI_BASE_IMAGE}
 
-# Re-declare build args after FROM and expose as env for downstream builds
+# Same base as c3-comfyui
+FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
+
 ARG MAX_JOBS
 ARG EXT_PARALLEL
-ENV MAX_JOBS=${MAX_JOBS} \
+
+# Same CUDA arch list as c3-comfyui
+ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0;12.0"
+
+ENV PYTHONUNBUFFERED=1 \
+    MAX_JOBS=${MAX_JOBS} \
     EXT_PARALLEL=${EXT_PARALLEL} \
     CMAKE_BUILD_PARALLEL_LEVEL=${MAX_JOBS}
 
+# Same apt layer as c3-comfyui (python, git, ffmpeg)
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    git \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
+RUN python3 -m venv /app/venv
 
 SHELL ["/bin/bash", "-c"]
 
-# Install sox (required by qwen-tts for audio processing)
-RUN apt-get update && apt-get install -y sox && rm -rf /var/lib/apt/lists/*
+# Same torch layer as c3-comfyui
+RUN source /app/venv/bin/activate && \
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Install qwen-tts + audio encoding deps (torch/flash-attn already in base)
+# Same flash-attn layer as c3-comfyui
+RUN source /app/venv/bin/activate && \
+    pip install packaging ninja wheel psutil && \
+    pip install flash-attn --no-build-isolation
+
+# === TTS-specific layers below (diverges from c3-comfyui here) ===
+
+# Install sox (required by qwen-tts for audio processing)
+RUN apt-get update && apt-get install -y --no-install-recommends sox && rm -rf /var/lib/apt/lists/*
+
+# Install qwen-tts + audio encoding deps
 RUN source /app/venv/bin/activate && \
     pip install --no-cache-dir \
     "qwen-tts @ git+https://github.com/QwenLM/Qwen3-TTS.git" \
@@ -26,12 +54,12 @@ RUN source /app/venv/bin/activate && \
     pydub \
     soundfile
 
-# Expose Gradio port
 EXPOSE 7860
 
-# Copy app and entrypoint (last for fast rebuilds)
+# Copy app files (last for fast rebuilds)
 COPY download.py /app/download.py
 COPY app.py /app/app.py
+COPY openai_api.py /app/openai_api.py
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
