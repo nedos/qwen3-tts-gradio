@@ -16,7 +16,20 @@ if [ -n "${PRELOAD_MODELS}" ]; then
 fi
 
 echo ""
-echo "Starting Gradio app..."
+echo "Starting Gradio app + OpenAI API..."
 echo "================================"
 
-exec /bin/bash -c "source /app/venv/bin/activate && python3 /app/app.py"
+# Activate venv
+source /app/venv/bin/activate
+
+# Start OpenAI API server in background
+echo "Starting OpenAI API server on port 8002..."
+python3 /app/openai_api.py &
+API_PID=$!
+
+# Start Gradio app
+echo "Starting Gradio app on port 7860..."
+exec python3 /app/app.py
+
+# Cleanup on exit
+trap "kill $API_PID 2>/dev/null; exit" INT TERM
