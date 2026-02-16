@@ -1,5 +1,15 @@
 # Reuse c3-comfyui base (CUDA 12.9 + torch + flash-attn pre-built)
-FROM ghcr.io/compute3ai/c3-comfyui:latest
+ARG COMFYUI_BASE_IMAGE=ghcr.io/compute3ai/c3-comfyui:latest
+ARG MAX_JOBS=2
+ARG EXT_PARALLEL=1
+FROM ${COMFYUI_BASE_IMAGE}
+
+# Re-declare build args after FROM and expose as env for downstream builds
+ARG MAX_JOBS
+ARG EXT_PARALLEL
+ENV MAX_JOBS=${MAX_JOBS} \
+    EXT_PARALLEL=${EXT_PARALLEL} \
+    CMAKE_BUILD_PARALLEL_LEVEL=${MAX_JOBS}
 
 WORKDIR /app
 
