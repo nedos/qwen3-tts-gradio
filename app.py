@@ -275,7 +275,7 @@ def build_ui():
                         )
                         design_btn = gr.Button("Generate", variant="primary")
                     with gr.Column(scale=2):
-                        design_audio = gr.Audio(label="Output Audio", type="filepath")
+                        design_audio = gr.File(label="Output Audio")
                         design_status = gr.Textbox(label="Status", lines=2, interactive=False)
 
                 design_btn.click(
@@ -312,7 +312,7 @@ def build_ui():
                         clone_btn = gr.Button("Clone & Generate", variant="primary")
 
                 with gr.Row():
-                    clone_audio = gr.Audio(label="Output Audio", type="filepath")
+                    clone_audio = gr.File(label="Output Audio")
                     clone_status = gr.Textbox(label="Status", lines=2, interactive=False)
 
                 clone_btn.click(
@@ -346,7 +346,7 @@ def build_ui():
                             )
                         tts_btn = gr.Button("Generate", variant="primary")
                     with gr.Column(scale=2):
-                        tts_audio = gr.Audio(label="Output Audio", type="filepath")
+                        tts_audio = gr.File(label="Output Audio")
                         tts_status = gr.Textbox(label="Status", lines=2, interactive=False)
 
                 tts_btn.click(
