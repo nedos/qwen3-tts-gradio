@@ -32,14 +32,14 @@ RUN python3 -m venv /app/venv
 
 SHELL ["/bin/bash", "-c"]
 
-# Same torch layer as c3-comfyui
+# Torch — pinned to 2.6.0+cu126 (torch 2.10 causes CUBLAS_STATUS_INVALID_VALUE on L4/Ada bf16 gemm)
 RUN source /app/venv/bin/activate && \
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+    pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 
-# Same flash-attn layer as c3-comfyui
+# flash-attn — pinned to 2.7.4.post1 (source build, no prebuilt wheels for flash-attn 2.x)
 RUN source /app/venv/bin/activate && \
     pip install packaging ninja wheel psutil && \
-    pip install flash-attn --no-build-isolation
+    pip install flash-attn==2.7.4.post1 --no-build-isolation
 
 # === TTS-specific layers below (diverges from c3-comfyui here) ===
 
